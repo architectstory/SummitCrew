@@ -1,0 +1,69 @@
+ 
+OpenAI Assistant에서 ResponsesAPI로
+최근 생성형 모델은 “답변 생성”에서 “작업 수행”으로 무게중심이 이동하였습니다.
+이제 모델은 도구 호출(tool use), 웹 검색(web search), 파일 검색(file search), 심지어 브라우저를 직접 조작하는 컴퓨터 사용(computer use)까지 수행하며, “에이전트(agent)”로 기능을 수행합니다.
+OpenAI는 이러한 변화를 OpenAI Assistant API기능에 반영하여 서비스하고 있습니다. 또한 어시스턴트의 경험을 통합·단순화한 Responses API와 Agents SDK를 새롭게 공개했고, Operator와 ChatGPT Agent 같은 레퍼런스 에이전트를 선보이며 제품 로드맵을 명확히 하고 있습니다.
+  
+이번 주제는 OpenAI의 ResponseAPI에 알아보고 간단한 실습을 통해 어떻게 동작하는지 이해해 보려 합니다.
+Responses API
+현재 서비스하고 있는 Assistants API는 애플리케이션 내부에 “지시문(instructions) + 도구(tools) + 파일(files)”을 가진 지능형 비서를 정의하고, 쓰레드(threads)와 메시지(messages) 위에서 런(runs)을 실행해 응답을 생성하는 방식으로 에이전트를 개발할 수 있는 API를 제공합니다.
+API를 이용하면 파일 검색과 코드 인터프리터(Code Interpreter), 함수 호출(function calling) 같은 고급 기능을 쉽게 묶어 줍니다.
+OpenAI 는  2026년 상반기부터 개발자 경험을 단순화하기 위해 Responses API로의 마이그레이션을 권장하며,  Assistants API는 공식 일정에 맞춰 단계적으로 종료될 예정이라고 발표했습니다.
+Assistant API의 특징
+도구 호출(Functions / Tool Calling): 모델이 필요한 함수를 스스로 선택·호출해 외부 시스템과 연동합니다.
+코드 실행(Code Interpreter): 샌드박스에서 코드·수치·파일 작업을 반복적으로 수행하여 정답을 개선합니다.
+지식 검색(File Search/Retrieval): 문서를 업로드하면 자동으로 파싱·청크·인덱싱(벡터+키워드)해 관련 근거를 검색·인용합니다.  관리(Conversation State): Assistants는 서버 측 상태를 관리했지만, Responses API에서는 메시지 히스토리 관리를 개발자가 명시적으로 제어합니다.
+Response API의 특징
+·  범용 단일 프리미티브(primitive): Chat Completions의 단순성 + 어시스턴트의 도구 호출(tool use)을 결합한 통합 API입니다. 하나의 호출에서 복수 도구와 다중 모델을 오케스트레이션할 수 있습니다
+·  빌트인 도구(built-in tools): 웹 검색(web search), 파일 검색(file search), 컴퓨터 사용(computer use) 등 도구를 공식 제공하며, 이후 이미지 생성·코드 인터프리터(Code Interpreter)·원격 MCP(Model Context Protocol) 서버까지 지원이 확대되었습니다.
+·  운영 가시성(Observability): 의미론적 이벤트(semantic events) 기반 스트리밍(streaming), 트레이싱(tracing)·평가(evaluations) 등 운영 기능이 문서·가이드로 정리되어 있습니다.
+ 
+Response API의 주요기능
+함수 호출(Function calling) – 외부 애플리케이션과 상호작용할 수 있도록 지원합니다.
+파일 검색(File Search) – 업로드된 파일에서 필요한 정보를 빠르게 찾습니다.
+웹(Web Search) – 최신 정보를 실시간으로 검색하여 AI 응답의 정확성을 높입니다.
+컴퓨터 사용(Computer Use)  – AI가 특정 작업을 실행하거나 시스템을 조작할 수 있도록 돕습니다.
+Assistants → Responses 마이그레이션
+Assistant/Thread/Run 중심의 서버 보관형(stateful) 모델 → 앱 주도형 상태 관리 + 단일 Responses 호출로 전환
+ File Search / Vector Store 객체는 Responses에서도 지속 지원되므로, 기존 인덱스·파일 자산을 재활용 가능
+ Code Interpreter/툴 호출 워크로드는 Responses의 빌트인 도구로 치환.
+ 신규 구축은 Responses 우선, Assistants는 공식 종료 전까지 유지—단, OpenAI는 신기능을 Responses 중심으로 제공합니다.
+구현 예시
+# 시스템 변수 적재
+from dot env import load_dotenv
+load_dotenv() # PC 환경변수에 OPENAI_API_KEY 변수로 등록한 키값 로딩딩
+# OpenAI 인스턴스 생성 (Responses API)
+from openai import OpenAI
+client = OpenAI()
+# 대화 상태(conversation state)는 애플리케이션이 관리합니다.
+history = [
+    {"role": "developer", "content": "당신은 리서치 에이전트입니다. 웹 검색을 활용하고, 마지막에 인용을 제시하세요."},
+    {"role": "user", "content": "Assistants API와 Responses API의 핵심 차이를 한 줄로 요약해 주세요."}
+]
+# 스트리밍(semantic events) 사용
+try:
+    with client.responses.stream(
+        model="gpt-4o-mini",  
+        input=history,
+        tools=[{"type": "web_search"}],   # 필요 시 모델이 자동으로 웹 검색 도구를 호출
+        # store=True,  # (선택) 서버측에 응답 상태 저장/백그라운드 모드 연동 시 고려
+     ) as stream:
+      # 이벤트 스트림 구독
+      for event in stream:
+          # 텍스트 델타가 도착할 때마다 콘솔에 바로 출력
+          if event.type == "response.output_text.delta":
+           	print(event.delta, end="", flush=True)
+          # (선택) 오류/완료 등의 이벤트도 감지 가능
+          elif event.type == "response.error":
+           	print(f"\n[error] {event.error}")
+          elif event.type == "response.completed":
+           	print("\n--- streaming completed ---")
+        # 스트림 종료 후 최종 Response 객체 획득
+        final = stream.get_final_response()
+        print("\n\n[final output_text]")
+        print(final.output_text)
+except Exception as e:
+    print(f"[exception] {e}")
+ 
+ 
+
