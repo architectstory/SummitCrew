@@ -1,69 +1,42 @@
- 
-OpenAI Assistant에서 ResponsesAPI로
-최근 생성형 모델은 “답변 생성”에서 “작업 수행”으로 무게중심이 이동하였습니다.
-이제 모델은 도구 호출(tool use), 웹 검색(web search), 파일 검색(file search), 심지어 브라우저를 직접 조작하는 컴퓨터 사용(computer use)까지 수행하며, “에이전트(agent)”로 기능을 수행합니다.
-OpenAI는 이러한 변화를 OpenAI Assistant API기능에 반영하여 서비스하고 있습니다. 또한 어시스턴트의 경험을 통합·단순화한 Responses API와 Agents SDK를 새롭게 공개했고, Operator와 ChatGPT Agent 같은 레퍼런스 에이전트를 선보이며 제품 로드맵을 명확히 하고 있습니다.
-  
-이번 주제는 OpenAI의 ResponseAPI에 알아보고 간단한 실습을 통해 어떻게 동작하는지 이해해 보려 합니다.
-Responses API
-현재 서비스하고 있는 Assistants API는 애플리케이션 내부에 “지시문(instructions) + 도구(tools) + 파일(files)”을 가진 지능형 비서를 정의하고, 쓰레드(threads)와 메시지(messages) 위에서 런(runs)을 실행해 응답을 생성하는 방식으로 에이전트를 개발할 수 있는 API를 제공합니다.
-API를 이용하면 파일 검색과 코드 인터프리터(Code Interpreter), 함수 호출(function calling) 같은 고급 기능을 쉽게 묶어 줍니다.
-OpenAI 는  2026년 상반기부터 개발자 경험을 단순화하기 위해 Responses API로의 마이그레이션을 권장하며,  Assistants API는 공식 일정에 맞춰 단계적으로 종료될 예정이라고 발표했습니다.
-Assistant API의 특징
-도구 호출(Functions / Tool Calling): 모델이 필요한 함수를 스스로 선택·호출해 외부 시스템과 연동합니다.
-코드 실행(Code Interpreter): 샌드박스에서 코드·수치·파일 작업을 반복적으로 수행하여 정답을 개선합니다.
-지식 검색(File Search/Retrieval): 문서를 업로드하면 자동으로 파싱·청크·인덱싱(벡터+키워드)해 관련 근거를 검색·인용합니다.  관리(Conversation State): Assistants는 서버 측 상태를 관리했지만, Responses API에서는 메시지 히스토리 관리를 개발자가 명시적으로 제어합니다.
-Response API의 특징
-·  범용 단일 프리미티브(primitive): Chat Completions의 단순성 + 어시스턴트의 도구 호출(tool use)을 결합한 통합 API입니다. 하나의 호출에서 복수 도구와 다중 모델을 오케스트레이션할 수 있습니다
-·  빌트인 도구(built-in tools): 웹 검색(web search), 파일 검색(file search), 컴퓨터 사용(computer use) 등 도구를 공식 제공하며, 이후 이미지 생성·코드 인터프리터(Code Interpreter)·원격 MCP(Model Context Protocol) 서버까지 지원이 확대되었습니다.
-·  운영 가시성(Observability): 의미론적 이벤트(semantic events) 기반 스트리밍(streaming), 트레이싱(tracing)·평가(evaluations) 등 운영 기능이 문서·가이드로 정리되어 있습니다.
- 
-Response API의 주요기능
-함수 호출(Function calling) – 외부 애플리케이션과 상호작용할 수 있도록 지원합니다.
-파일 검색(File Search) – 업로드된 파일에서 필요한 정보를 빠르게 찾습니다.
-웹(Web Search) – 최신 정보를 실시간으로 검색하여 AI 응답의 정확성을 높입니다.
-컴퓨터 사용(Computer Use)  – AI가 특정 작업을 실행하거나 시스템을 조작할 수 있도록 돕습니다.
-Assistants → Responses 마이그레이션
-Assistant/Thread/Run 중심의 서버 보관형(stateful) 모델 → 앱 주도형 상태 관리 + 단일 Responses 호출로 전환
- File Search / Vector Store 객체는 Responses에서도 지속 지원되므로, 기존 인덱스·파일 자산을 재활용 가능
- Code Interpreter/툴 호출 워크로드는 Responses의 빌트인 도구로 치환.
- 신규 구축은 Responses 우선, Assistants는 공식 종료 전까지 유지—단, OpenAI는 신기능을 Responses 중심으로 제공합니다.
-구현 예시
-# 시스템 변수 적재
-from dot env import load_dotenv
-load_dotenv() # PC 환경변수에 OPENAI_API_KEY 변수로 등록한 키값 로딩딩
-# OpenAI 인스턴스 생성 (Responses API)
-from openai import OpenAI
-client = OpenAI()
-# 대화 상태(conversation state)는 애플리케이션이 관리합니다.
-history = [
-    {"role": "developer", "content": "당신은 리서치 에이전트입니다. 웹 검색을 활용하고, 마지막에 인용을 제시하세요."},
-    {"role": "user", "content": "Assistants API와 Responses API의 핵심 차이를 한 줄로 요약해 주세요."}
-]
-# 스트리밍(semantic events) 사용
-try:
-    with client.responses.stream(
-        model="gpt-4o-mini",  
-        input=history,
-        tools=[{"type": "web_search"}],   # 필요 시 모델이 자동으로 웹 검색 도구를 호출
-        # store=True,  # (선택) 서버측에 응답 상태 저장/백그라운드 모드 연동 시 고려
-     ) as stream:
-      # 이벤트 스트림 구독
-      for event in stream:
-          # 텍스트 델타가 도착할 때마다 콘솔에 바로 출력
-          if event.type == "response.output_text.delta":
-           	print(event.delta, end="", flush=True)
-          # (선택) 오류/완료 등의 이벤트도 감지 가능
-          elif event.type == "response.error":
-           	print(f"\n[error] {event.error}")
-          elif event.type == "response.completed":
-           	print("\n--- streaming completed ---")
-        # 스트림 종료 후 최종 Response 객체 획득
-        final = stream.get_final_response()
-        print("\n\n[final output_text]")
-        print(final.output_text)
-except Exception as e:
-    print(f"[exception] {e}")
- 
- 
+지금, MCP(Model Context Protocol)로 당신의 AI를 실전에 투입하라」
 
+최근 에이전트 관련해서 MCP가 주요 키워드인듯 합니다.
+이유는 에이전트를 좀더 똑똑하게 사용할 수 있는 방법을 제공해서 입니다.
+이제 AI가 일상과 산업 곳곳에 깊이 스며드는 시대, 
+‘실전에서 활용할 수 있는 AI’를 고민하는 이라면 읽어볼 만한 책인 있어 소개합니다.
+이 책에서는 최신 AI 에이전트의 실제 구현 원리와, 
+이를 실효적으로 활용할 수 있는 MCP(Model Context Protocol)라는 
+최근 등장한 기술의 체계적 활용법을 간략하고 명쾌하게 안내하고 있습니다.
+
+전체 목차의 구성은 6장으로 구성되어 있고, 
+CHAPTER 1 AI 에이전트가 만드는 세상 
+CHAPTER 2 AI 에이전트를 가능하게 하는 MCP 
+CHAPTER 3 MCP 실전 활용 가이드 
+CHAPTER 4 MCP를 더 똑똑하게 쓰는 법 
+CHAPTER 5 나만의 MCP 서버 만들기 
+CHAPTER 6 AI 에이전트와 MCP의 미래 
+
+페이지 수(205)와 내용이 저 같이 AI 관련 용어에 익숙하지 않아도 
+쉽게 읽어 내려갈 수 친절하고 자세하게 설명하고 있습니다.
+
+CHAPTER 1에서 CHAPTER 3까지의 주요 내용을 살펴보면
+CHAPTER 1에서는 주로 AI, 에이전트, AI 에이전트의 등장과 관련 개괄적인 이해 위주로 설명입니다.
+CHAPTER 2에서는 프로토콜의 개념과, MCP가 필요한 이유, MCP를 왜 사용하고, 어떤 구성요소가 있는지 설명하고 있습니다.
+CHAPTER 3에서는 MCP를 이용한 설정과 활용을 가이드하고 있습니다
+특히 이장에서는 엔트로픽에서 제공하는 MCP서버들의 활용사례가 흥미롭습니다.
+엔트로픽에서 제공하는 MCP서버 중에 
+Filesystem MCP, Google Map 기반 MCP, Slack 연동 MCP, 순차적 사고를 구현한 Sequential thinking MCP 의 활용방법을 다루고 있습니다.
+  Filesystem MCP - 사용자가 지정한 디렉토리내  문서나 코드 파일 등을 AI에 제공하면 폴더 정리등의 복잡한 작업을 수행
+  Google Map MCP - Google Maps 서비스를 이용해 주소를 좌표로 변환하거나, 좌표를 주소로 변환, 장소, 거리, 시간 계산 등
+  Slack MCP - Slack API 이용한 처리, 채널 히스토리를 조회해서 필요한 내용을 시간 순으로 정리하는 방법등으로 유용하게 사용
+  Sequential thinking -  복잡한 문제를 작고 다루기 쉬운 단계로 나누는 기능, 새로운 정보가 생기면 이전 단계의 생각을 수정, 다양한 해결책 탐색
+  그 외 MCP 목록 - AWS Bedrock Knowledge Base 검색(기업내부자료보관소에서), Brave 검색(개인정보강화된검색) EverArt (이미지생성)
+                  Git(자연어로 코드 관리), Gitlab(코드저장소, 병합요청, 코드 검토 등), Google Drive(파일찾기), PostgreSQL(자연어질의)
+                  Redis(데이터를 조회), Sqlite(DB정보읽어 분석), Time(전세계시간)
+                  MCP 서버 정보 공유 - Smithery(https://smithery.ai) 서비스 개발사가 제공하는 공식 MCP서버들 외에도 개인이 개발한 MCP서버 정보제공
+
+「지금, MCP로 당신의 AI를 실전에 투입하라」는 바로 써먹을 수 있는 노하우를 제시하는 내용이라 흥미로웠습니다.
+이 책을 읽기 전까지는 블로그 등에 올라온 글들을 참고해서 개인적으로 공부하고 MCP를 만들어 보기도 했는데
+책을 통해서 개념을 정리하고, 좀 더 시야를 넓히는데 도움이 많이 되었습니다.
+기술적 기초를 알고 싶은 초보부터, 자신의 데이터·비즈니스에 AI혁신을 더하고 싶은 실무자까지. 
+AI는 코드를 쓰지 않아도 MCP를 활용할 수 있는 AI Agent 입문서로 추천합니다.
